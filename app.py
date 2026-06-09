@@ -4,10 +4,13 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 import plotly.express as px
+import plotly.figure_factory as ff
 import joblib
+import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
+import shap
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 from preprocess import load_and_clean, get_features
@@ -46,18 +49,44 @@ with st.spinner("Loading AI model..."):
 st.success("✅ Model loaded successfully!")
 
 # ─── Sidebar ───────────────────────────────────────────────
+
+st.sidebar.markdown("""
+### 📖 About
+This dashboard detects network intrusions using **Random Forest ML** trained on the CICIDS2017 benchmark dataset.
+
+**Attack types detected:**
+- 🔴 DDoS (Distributed Denial of Service)
+
+**AI Features:**
+- SHAP Explainability
+- Confidence scoring
+
+
+**Dataset:** CICIDS2017 — Canadian Institute for Cybersecurity
+""")
 st.sidebar.title("⚙️ Controls")
 st.sidebar.markdown("Upload your network traffic CSV or use sample data.")
 uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
 use_sample = st.sidebar.button("Use Sample Data")
 
+
 # ─── Load Data ─────────────────────────────────────────────
 df = None
 if uploaded_file:
     df = load_and_clean(uploaded_file)
-    st.sidebar.success("File uploaded!")
-elif use_sample or True:
+    st.sidebar.success("✅ File uploaded successfully!")
+    st.sidebar.info(f"📊 {len(df)} flows loaded")
+elif use_sample:
     df = load_and_clean('data/sample_traffic.csv')
+    st.sidebar.success("✅ Sample data loaded!")
+else:
+    df = load_and_clean('data/sample_traffic.csv')
+    st.sidebar.info("📂 Using sample data by default")
+st.sidebar.markdown("""
+---
+⚠️ **Upload format:** CSV must contain network flow features exported from CICFlowMeter tool (same format as CICIDS2017 dataset).
+""")    
+    
 
 # ─── Predict ───────────────────────────────────────────────
 if df is not None:
@@ -89,12 +118,13 @@ if df is not None:
     col4.metric("Avg Confidence", f"{avg_conf:.1f}%")
 
     st.markdown("---")
-
+    
+    
     # ─── Charts ────────────────────────────────────────────
     col_left, col_right = st.columns(2)
 
     with col_left:
-        st.subheader("🥧 Traffic Breakdown")
+        st.subheader(" Traffic Breakdown")
         count_df = df['Prediction'].value_counts().reset_index()
         count_df.columns = ['Type', 'Count']
         fig1 = px.pie(count_df, names='Type', values='Count',
@@ -133,6 +163,58 @@ if df is not None:
         st.dataframe(attacks_df, use_container_width=True)
     else:
         st.success("No attacks detected in this traffic sample!")
+        
+   
+    
+    # ─── Individual Flow Explanation ───────────────────────
+    st.markdown("---")
+    st.subheader("🔬 Explain a Specific Flow")
+    st.markdown("Select a suspicious flow to see exactly WHY the model flagged it as an attack.")
+
+    attack_indices = df[df['Prediction'] != 'BENIGN'].index.tolist()
+    
+    if len(attack_indices) > 0:
+        selected_idx = st.selectbox(
+            "Select a suspicious flow to explain:",
+            options=attack_indices[:20],
+            format_func=lambda x: f"Flow #{x} — {df.loc[x, 'Prediction']} ({df.loc[x, 'Confidence %']:.1f}% confidence)"
+        )
+        
+        flow = X_input.loc[[selected_idx]]
+        flow_clean = flow.reindex(columns=feature_names, fill_value=0).fillna(0)
+        flow_clean = flow_clean.replace([np.inf, -np.inf], 0)
+        
+        explainer = shap.TreeExplainer(model)
+        shap_single = explainer.shap_values(flow_clean)
+        if isinstance(shap_single, list):
+            shap_single_vals = shap_single[1][0]
+        else:
+            shap_single_vals = shap_single[0]
+        
+        single_df = pd.DataFrame({
+            'Feature': feature_names,
+            'SHAP Value': shap_single_vals
+        }).sort_values('SHAP Value', key=abs, ascending=False).head(8)
+        
+        single_df['Direction'] = single_df['SHAP Value'].apply(
+            lambda x: '🔴 Pushes toward ATTACK' if x > 0 else '🟢 Pushes toward NORMAL'
+        )
+        
+        fig_single = px.bar(
+            single_df, x='SHAP Value', y='Feature',
+            orientation='h',
+            color='SHAP Value',
+            color_continuous_scale='RdYlGn_r',
+            title=f'Why Flow #{selected_idx} was flagged as {df.loc[selected_idx, "Prediction"]}'
+        )
+        fig_single.update_layout(yaxis={'categoryorder': 'total ascending'})
+        st.plotly_chart(fig_single, use_container_width=True)
+        
+        st.markdown("**Interpretation:**")
+        top_reason = single_df.iloc[0]
+        st.info(f"🎯 The strongest reason this flow was flagged: **{top_reason['Feature']}** had a SHAP value of **{top_reason['SHAP Value']:.4f}** — {top_reason['Direction']}")
+    else:
+        st.success("No attack flows to explain!")    
 
     # ─── Download ──────────────────────────────────────────
     st.markdown("---")
