@@ -187,9 +187,9 @@ if df is not None:
         explainer = shap.TreeExplainer(model)
         shap_single = explainer.shap_values(flow_clean)
         if isinstance(shap_single, list):
-            shap_single_vals = shap_single[1][0]
+            shap_single_vals = np.array(shap_single[1]).flatten()
         else:
-            shap_single_vals = shap_single[0]
+            shap_single_vals = np.array(shap_single).flatten()
         
         single_df = pd.DataFrame({
             'Feature': feature_names,
