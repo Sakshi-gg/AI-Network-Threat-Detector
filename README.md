@@ -27,6 +27,7 @@ This dashboard detects malicious network traffic using machine learning. Upload 
 - 📊 **Interactive Dashboard** — Traffic breakdown charts and confidence scores
 - ⚙️ **Threshold Control** — Adjustable confidence threshold for alerts
 - ⬇️ **Export** — Download alert report as CSV
+- 🔜 **Coming Soon** — PortScan and BruteForce attack detection
 
 ## 🗂️ Dataset
 Trained on [CICIDS2017](https://www.unb.ca/cic/datasets/ids-2017.html) — Canadian Institute for Cybersecurity benchmark dataset with 225,000+ real network flows.
