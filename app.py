@@ -165,7 +165,6 @@ if df is not None:
         st.success("No attacks detected in this traffic sample!")
         
    
-    
     # ─── Individual Flow Explanation ───────────────────────
     st.markdown("---")
     st.subheader("🔬 Explain a Specific Flow")
@@ -180,26 +179,40 @@ if df is not None:
             format_func=lambda x: f"Flow #{x} — {df.loc[x, 'Prediction']} ({df.loc[x, 'Confidence %']:.1f}% confidence)"
         )
         
-        flow = X_input.loc[[selected_idx]]
-        flow_clean = flow.reindex(columns=feature_names, fill_value=0).fillna(0)
+        flow_clean = X_input.loc[[selected_idx]].reindex(
+            columns=feature_names, fill_value=0).fillna(0)
         flow_clean = flow_clean.replace([np.inf, -np.inf], 0)
-        
+
         explainer = shap.TreeExplainer(model)
         shap_single = explainer.shap_values(flow_clean)
+
+        # handle different SHAP output formats
         if isinstance(shap_single, list):
-            shap_single_vals = np.array(shap_single[1]).flatten()
+            # multi-class output — take class 1 (attack class)
+            vals = np.array(shap_single[1]).flatten()
+        elif hasattr(shap_single, 'values'):
+            # newer SHAP Explanation object
+            v = shap_single.values
+            if v.ndim == 3:
+                vals = v[0, :, 1]
+            elif v.ndim == 2:
+                vals = v[0]
+            else:
+                vals = v.flatten()
         else:
-            shap_single_vals = np.array(shap_single).flatten()
-        
+            vals = np.array(shap_single).flatten()
+
+        # make sure lengths match
+        min_len = min(len(feature_names), len(vals))
         single_df = pd.DataFrame({
-            'Feature': feature_names,
-            'SHAP Value': shap_single_vals
+            'Feature': feature_names[:min_len],
+            'SHAP Value': vals[:min_len]
         }).sort_values('SHAP Value', key=abs, ascending=False).head(8)
-        
+
         single_df['Direction'] = single_df['SHAP Value'].apply(
             lambda x: '🔴 Pushes toward ATTACK' if x > 0 else '🟢 Pushes toward NORMAL'
         )
-        
+
         fig_single = px.bar(
             single_df, x='SHAP Value', y='Feature',
             orientation='h',
@@ -209,12 +222,11 @@ if df is not None:
         )
         fig_single.update_layout(yaxis={'categoryorder': 'total ascending'})
         st.plotly_chart(fig_single, use_container_width=True)
-        
-        st.markdown("**Interpretation:**")
+
         top_reason = single_df.iloc[0]
-        st.info(f"🎯 The strongest reason this flow was flagged: **{top_reason['Feature']}** had a SHAP value of **{top_reason['SHAP Value']:.4f}** — {top_reason['Direction']}")
+        st.info(f"🎯 Strongest reason: **{top_reason['Feature']}** — {top_reason['Direction']}")
     else:
-        st.success("No attack flows to explain!")    
+        st.success("No attack flows to explain!")  
 
     # ─── Download ──────────────────────────────────────────
     st.markdown("---")
